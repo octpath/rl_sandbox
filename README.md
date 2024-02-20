@@ -1,1 +1,2 @@
 # rl_sandbox
+keras_coreで強化学習を書いてみるテスト
