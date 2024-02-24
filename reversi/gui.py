@@ -32,9 +32,7 @@ def main(page: ft.Page):
     page.title = "MCTS REVERSI"
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
     page.theme_mode = ft.ThemeMode.DARK
-    page.fonts = {
-        'MPlus1cLight': './fonts/M_PLUS_Rounded_1c/MPLUSRounded1c-Light.ttf'
-    }
+    page.fonts = {"MPlus1cLight": "./fonts/M_PLUS_Rounded_1c/MPLUSRounded1c-Light.ttf"}
 
     def state_2d_to_board(state_2d):
         """
@@ -196,6 +194,19 @@ def main(page: ft.Page):
         """
         スタートボタン押下: モデル読み込みや盤面初期化・表示
         """
+        # restart時: 既にあるボードを消す
+        num_board_rows = np.sum(
+            [
+                1 if (control.key is not None) and (control.key.startswith("board_row")) else 0
+                for control in page.controls
+            ]
+        )
+        for _ in range(num_board_rows):
+            page.controls.pop()
+        if num_board_rows > 0:
+            page.update()
+
+        # ここからstart
         num_rows, num_cols = [int(k) for k in dd.value.split(",")]
         human = 1 if dd_teban.value == "b" else -1
 
@@ -207,16 +218,8 @@ def main(page: ft.Page):
         model = keras.models.load_model(f"model_{num_rows}x{num_cols}.keras")
         mcts = MCTS(model)
 
-        # ボードの表示 (restart時など既にボードがある場合は消す)
+        # ボードの表示
         board = state_2d_to_board(reversi.get_state_2d(state))
-        num_board_rows = np.sum(
-            [
-                1 if (control.key is not None) and (control.key.startswith("board_row")) else 0
-                for control in page.controls
-            ]
-        )
-        for _ in range(num_board_rows):
-            page.controls.pop()
         for r_, board_row in enumerate(board):
             page.add(ft.Row(board_row, key=f"board_row_{r_}", alignment=ft.MainAxisAlignment.CENTER))
 
@@ -233,7 +236,7 @@ def main(page: ft.Page):
             page.update()  # 先に表示を更新しておく
 
             e_ai_idx = e_ai(mcts, state, current_player, reversi)
-            next_state, is_done = reversi.step(state, e_ai_idx, current_player)
+            next_state, _ = reversi.step(state, e_ai_idx, current_player)
             update_board(board, reversi, state, e_ai_idx, next_state)
 
             state = next_state
@@ -253,15 +256,19 @@ def main(page: ft.Page):
         e.control.text = "Restart"
         page.update()
 
-    ilegal_dialog = ft.AlertDialog(modal=False, title=ft.Text("無効な手です", text_align=ft.TextAlign.CENTER, font_family="MPlus1cLight"))
+    ilegal_dialog = ft.AlertDialog(
+        modal=False, title=ft.Text("無効な手です", text_align=ft.TextAlign.CENTER, font_family="MPlus1cLight")
+    )
 
     dd = ft.Dropdown(
+        value="6,6",
         width=200,
         options=[
             ft.dropdown.Option("6,6", text="6 x 6"),
         ],
     )
     dd_teban = ft.Dropdown(
+        value="b",
         width=200,
         options=[
             ft.dropdown.Option("b", text="BLACK"),
