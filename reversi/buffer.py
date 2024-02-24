@@ -23,9 +23,7 @@ class ReplayBuffer:
     def get_minibatch(self, batch_size, game):
         indices = np.random.choice(range(len(self.buffer)), size=batch_size)
         samples = [self.buffer[idx] for idx in indices]
-        states = np.stack(
-            [game.get_nn_state(s.state, s.player) for s in samples], axis=0
-        )
+        states = np.stack([game.get_nn_state(s.state, s.player) for s in samples], axis=0)
         mcts_policy = np.array([s.mcts_policy for s in samples], dtype=np.float32)
         rewards = np.array([s.reward for s in samples], dtype=np.float32).reshape(-1, 1)
         return (states, mcts_policy, rewards)

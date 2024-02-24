@@ -18,18 +18,10 @@ class Reversi:
 
     def initialize(self):
         state = np.zeros((self.num_cols * self.num_rows,), dtype=np.int32)
-        state[
-            self._convert_index_2d_to_1d(self.num_rows // 2 - 1, self.num_cols // 2 - 1)
-        ] = self.sente
-        state[self._convert_index_2d_to_1d(self.num_rows // 2, self.num_cols // 2)] = (
-            self.sente
-        )
-        state[
-            self._convert_index_2d_to_1d(self.num_rows // 2 - 1, self.num_cols // 2)
-        ] = self.gote
-        state[
-            self._convert_index_2d_to_1d(self.num_rows // 2, self.num_cols // 2 - 1)
-        ] = self.gote
+        state[self._convert_index_2d_to_1d(self.num_rows // 2 - 1, self.num_cols // 2 - 1)] = self.sente
+        state[self._convert_index_2d_to_1d(self.num_rows // 2, self.num_cols // 2)] = self.sente
+        state[self._convert_index_2d_to_1d(self.num_rows // 2 - 1, self.num_cols // 2)] = self.gote
+        state[self._convert_index_2d_to_1d(self.num_rows // 2, self.num_cols // 2 - 1)] = self.gote
         return state
 
     def _convert_index_1d_to_2d(self, idx):
@@ -57,27 +49,17 @@ class Reversi:
         _, col = self._convert_index_1d_to_2d(idx)
         return (
             np.arange(idx, -1, -self.num_cols)[1:].astype(np.int32),  # top
-            np.arange(idx, -1, -self.num_cols + 1)[1 : self.num_cols - col].astype(
-                np.int32
-            ),  # top_right
+            np.arange(idx, -1, -self.num_cols + 1)[1 : self.num_cols - col].astype(np.int32),  # top_right
             np.arange(idx + 1, idx + self.num_cols - col).astype(np.int32),  # right
-            np.arange(idx, self.num_rows * self.num_cols, self.num_cols + 1)[
-                1 : self.num_cols - col
-            ].astype(
+            np.arange(idx, self.num_rows * self.num_cols, self.num_cols + 1)[1 : self.num_cols - col].astype(
                 np.int32
             ),  # bottom_right
-            np.arange(idx, self.num_rows * self.num_cols, self.num_cols)[1:].astype(
-                np.int32
-            ),  # bottom
-            np.arange(idx, self.num_rows * self.num_cols, self.num_cols - 1)[
-                1 : col + 1
-            ].astype(
+            np.arange(idx, self.num_rows * self.num_cols, self.num_cols)[1:].astype(np.int32),  # bottom
+            np.arange(idx, self.num_rows * self.num_cols, self.num_cols - 1)[1 : col + 1].astype(
                 np.int32
             ),  # bottom_left
             np.arange(idx - col, idx, 1).astype(np.int32)[::-1],  # left
-            np.arange(idx, -1, -self.num_cols - 1)[1 : col + 1].astype(
-                np.int32
-            ),  # top_left
+            np.arange(idx, -1, -self.num_cols - 1)[1 : col + 1].astype(np.int32),  # top_left
         )
 
     def is_legal_move(self, state, idx, player):
@@ -106,11 +88,7 @@ class Reversi:
     #     return self._get_legal_moves(state_str, player)
 
     def get_legal_moves(self, state, player):
-        legal_moves = [
-            idx
-            for idx in range(self.num_rows * self.num_cols)
-            if self.is_legal_move(state, idx, player)
-        ]
+        legal_moves = [idx for idx in range(self.num_rows * self.num_cols) if self.is_legal_move(state, idx, player)]
         if len(legal_moves) == 0:
             legal_moves = [self.action_noop]
         return legal_moves
@@ -134,9 +112,7 @@ class Reversi:
         if np.random.random() > epsilon:
             if legal_moves == [self.action_noop]:
                 return self.action_noop
-            best_action_idx = np.argmax(
-                [self.get_num_opposite_discs(state, idx, player) for idx in legal_moves]
-            )
+            best_action_idx = np.argmax([self.get_num_opposite_discs(state, idx, player) for idx in legal_moves])
             z = legal_moves[best_action_idx]
             return z
         else:

@@ -17,9 +17,7 @@ from model import build_resnet
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def selfplay(
-    *, weights, num_mcts_simulations, dirichlet_alpha, reversi, model_fn, model_params
-):
+def selfplay(*, weights, num_mcts_simulations, dirichlet_alpha, reversi, model_fn, model_params):
     """
     SelfPlayを行って棋譜を返す
     """
@@ -45,9 +43,7 @@ def selfplay(
             # 序盤の数手は完全ランダムにする (探索重視)
             action = np.random.choice(range(reversi.action_space_dims), p=mcts_policy)
         else:
-            action = np.random.choice(
-                np.where(np.array(mcts_policy) == max(mcts_policy))[0]
-            )
+            action = np.random.choice(np.where(np.array(mcts_policy) == max(mcts_policy))[0])
         i += 1
 
         record.append(Sample(state, mcts_policy, current_player, None))
@@ -147,12 +143,10 @@ def main(
     save_period=3000,
 ):
 
-    num_rows = 6
-    num_cols = 6
+    num_rows = 8
+    num_cols = 8
     model_fn = build_resnet
-    model_params = dict(
-        num_rows=num_rows, num_cols=num_cols, action_space_dims=num_rows * num_cols + 1
-    )
+    model_params = dict(num_rows=num_rows, num_cols=num_cols, action_space_dims=num_rows * num_cols + 1)
 
     str_now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     save_dir = save_dir_prefix + f"_{num_rows}x{num_cols}_" + str_now
@@ -207,9 +201,7 @@ def main(
         if len(replay) >= min_buffer_size_for_training:
             num_iters = epochs_per_update * (len(replay) // batch_size)
             for _ in range(num_iters):
-                states, mcts_policy, rewards = replay.get_minibatch(
-                    batch_size=batch_size, game=reversi
-                )
+                states, mcts_policy, rewards = replay.get_minibatch(batch_size=batch_size, game=reversi)
                 loss = model.train_on_batch(states, [mcts_policy, rewards])
                 loss_m.update_state(loss)
                 num_updates += 1
