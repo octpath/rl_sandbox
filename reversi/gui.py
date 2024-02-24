@@ -29,8 +29,12 @@ def get_done_message(reversi, state):
 
 
 def main(page: ft.Page):
-    page.title = "MCTSでリバーシ"
+    page.title = "MCTS REVERSI"
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
+    page.theme_mode = ft.ThemeMode.DARK
+    page.fonts = {
+        'MPlus1cLight': './fonts/M_PLUS_Rounded_1c/MPLUSRounded1c-Light.ttf'
+    }
 
     def state_2d_to_board(state_2d):
         """
@@ -141,12 +145,6 @@ def main(page: ft.Page):
             ilegal_dialog.open = True
             page.update()
 
-    def btn_done_clicked(e):
-        """
-        初期化したいんやけどやり方がよう分からん・・べた書き？
-        """
-        pass
-
     def btn_pass_clicked(e):
         """
         パスボタン押下イベ
@@ -255,7 +253,7 @@ def main(page: ft.Page):
         e.control.text = "Restart"
         page.update()
 
-    ilegal_dialog = ft.AlertDialog(modal=False, title=ft.Text("無効な手です"))
+    ilegal_dialog = ft.AlertDialog(modal=False, title=ft.Text("無効な手です", text_align=ft.TextAlign.CENTER, font_family="MPlus1cLight"))
 
     dd = ft.Dropdown(
         width=200,
@@ -271,10 +269,10 @@ def main(page: ft.Page):
         ],
     )
     btn_start = ft.ElevatedButton(text="Start", on_click=btn_start_clicked)
-    btn_pass = ft.ElevatedButton(text="Pass", on_click=btn_pass_clicked, visible=False, disabled=True)
-    txt_done = ft.Text("", visible=False)
+    btn_pass = ft.FilledButton(text="Pass", on_click=btn_pass_clicked, visible=False, disabled=True)
+    txt_done = ft.Text("", visible=False, font_family="MPlus1cLight")
     cnt_next = ft.Container(width=25, height=25, bgcolor=ft.colors.GREEN, visible=False)
-    txt_next = ft.Text("", visible=False)
+    txt_next = ft.Text("", visible=False, font_family="MPlus1cLight")
 
     page.add(
         ft.Row(
