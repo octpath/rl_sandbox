@@ -4,6 +4,6 @@
 !*/
 
 !.gitignore
-!README.md
+!*.md
 
 !*.py
