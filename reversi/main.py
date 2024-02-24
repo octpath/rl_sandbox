@@ -1,229 +1,267 @@
-from dataclasses import dataclass
-import time
-import random
-
-import keras
-import numpy as np
-import ray
-from tqdm import tqdm
-
-from model import build_resnet
-from mcts import MCTS
-from buffer import ReplayBuffer
-from reversi import Reversi
-import datetime
-from loguru import logger
+# coding: utf-8
 import os
+import numpy as np
+from tqdm import tqdm
+import datetime
+import time
+import ray
+from loguru import logger
 
 os.environ["KERAS_BACKEND"] = "jax"
+import keras
 
-@dataclass
-class Sample:
-    state: list
-    mcts_policy: list
-    player: int
-    reward: int
+from reversi import Reversi
+from mcts import MCTS
+from buffer import ReplayBuffer, Sample
+from model import build_resnet
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def selfplay(weights, num_mcts_simulations, dirichlet_alpha, reversi):
-
-    state = reversi.initialize()
+def selfplay(
+    *, weights, num_mcts_simulations, dirichlet_alpha, reversi, model_fn, model_params
+):
+    """
+    SelfPlayを行って棋譜を返す
+    """
+    model = model_fn(**model_params)
+    model.set_weights(weights)
+    mcts = MCTS(model=model)
 
     record = []
-    model = build_resnet(n_rows=reversi.n_rows, n_cols=reversi.n_cols, action_space=reversi.n_action_space)
-    # model.predict(rvrs.get_nn_state(state, 1))
-    model.set_weights(weights)
-    mcts = MCTS(model=model, reversi=reversi, alpha=dirichlet_alpha)
+    state = reversi.initialize()
     current_player = 1
     done = False
     i = 0
-
     while not done:
         mcts_policy = mcts.search(
             root_state=state,
             current_player=current_player,
             num_simulations=num_mcts_simulations,
+            game=reversi,
+            alpha=dirichlet_alpha,
         )
 
         if i <= 10:
-            # For the first 30 moves of each game, the temperature is set to τ = 1;
-            # this selects moves proportionally to their visit count in MCTS
-            action = np.random.choice(range(reversi.n_action_space), p=mcts_policy)
+            # 序盤の数手は完全ランダムにする (探索重視)
+            action = np.random.choice(range(reversi.action_space_dims), p=mcts_policy)
         else:
-            action = random.choice(np.where(np.array(mcts_policy) == max(mcts_policy))[0])
+            action = np.random.choice(
+                np.where(np.array(mcts_policy) == max(mcts_policy))[0]
+            )
+        i += 1
 
         record.append(Sample(state, mcts_policy, current_player, None))
         next_state, done = reversi.step(state, action, current_player)
         state = next_state
         current_player = -current_player
-        i += 1
 
-    #: win: 1, lose: -1, draw: 0
-    reward_first, reward_second = reversi.get_result(state)
+    # 遡ってrewardをセットする
+    reward_sente, reward_gote = reversi.get_result(state)
     for sample in reversed(record):
-        sample.reward = reward_first if sample.player == 1 else reward_second
+        sample.reward = reward_sente if sample.player == 1 else reward_gote
+
     return record
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def testplay(current_weights, num_mcts_simulations, reversi, save_dir,
-             dirichlet_alpha=None, n_testplay=24):
-
+def testplay(
+    *,
+    weights,
+    num_mcts_simulations,
+    reversi,
+    save_dir,
+    model_fn,
+    model_params,
+    dirichlet_alpha=None,
+    num_testplay=24,
+):
+    """
+    学習したモデルを使ってGreedyTesterと対局する
+    """
     t = time.time()
+
+    model = model_fn(**model_params)
+    model.set_weights(weights)
+
     win_count = 0
+    for n in range(num_testplay):
+        alpha_zero = np.random.choice([1, -1])  # 手番を決める
+        mcts = MCTS(model=model)
 
-    model = build_resnet(n_rows=reversi.n_rows, n_cols=reversi.n_cols, action_space=reversi.n_action_space)
-    model.set_weights(current_weights)
-
-    for n in range(n_testplay):
-        alphazero = random.choice([1, -1])
-        mcts = MCTS(model=model, alpha=dirichlet_alpha, reversi=reversi)
         state = reversi.initialize()
-
         current_player = 1
         done = False
-
         while not done:
-            if current_player == alphazero:
+            if current_player == alpha_zero:
                 mcts_policy = mcts.search(
                     root_state=state,
                     current_player=current_player,
-                    num_simulations=num_mcts_simulations
+                    num_simulations=num_mcts_simulations,
+                    game=reversi,
+                    alpha=dirichlet_alpha,
                 )
                 action = np.argmax(mcts_policy)
             else:
                 action = reversi.get_greedy_action(state, current_player, epsilon=0.3)
 
             next_state, done = reversi.step(state, action, current_player)
-
             state = next_state
             current_player = -1 * current_player
 
-        reward_first, reward_second = reversi.get_result(state)
-        reward = reward_first if alphazero == 1 else reward_second
+        # 結果判定・終了処理
+        reward_sente, reward_gote = reversi.get_result(state)
+        reward = reward_sente if alpha_zero == 1 else reward_gote
         result = "win" if reward == 1 else "lose" if reward == -1 else "draw"
-
         if reward > 0:
             win_count += 1
 
-        stone_first, stone_second = reversi.count_discs(state)
-
-        if alphazero == 1:
-            stone_az, stone_tester = stone_first, stone_second
-            color = "black"
+        # 結果を画像として保存
+        sente_discs, gote_discs = reversi.count_discs(state)
+        if alpha_zero == 1:
+            az_discs, tester_discs = sente_discs, gote_discs
+            az_color = "black"
         else:
-            stone_az, stone_tester = stone_second, stone_first
-            color = "white"
-
-        message = f"AlphaZero ({color}) {result}: {stone_az} vs {stone_tester}"
-
-        reversi.save_img(state, os.path.join(save_dir, 'img'), f"test_{n}.png", message)
+            az_discs, tester_discs = gote_discs, sente_discs
+            az_color = "white"
+        message = f"AlphaZero ({az_color}) {result}: {az_discs} vs {tester_discs}"
+        reversi.save_img(state, os.path.join(save_dir, "img"), f"test_{n}.png", message)
 
     elapsed = time.time() - t
-
-    return win_count, win_count / n_testplay, elapsed
-
+    return win_count, win_count / num_testplay, elapsed
 
 
-def main(num_cpus, n_episodes=10000, buffer_size=40000,
-         batch_size=64, epochs_per_update=5,
-         num_mcts_simulations=50,
-         update_period=300, test_period=300,
-         n_testplay=20,
-         save_period=3000,
-         dirichlet_alpha=0.35):
-    
-    n_rows = 6
-    n_cols = 6
+def main(
+    *,
+    num_cpus,
+    save_dir_prefix,
+    num_episodes=10000,
+    update_period=300,  # SelfPlayを収集する単位
+    buffer_size=40000,  # ReplayBufferのサイズ
+    min_buffer_size_for_training=20000,  # 学習を開始する最小のバッファサイズ
+    batch_size=64,
+    epochs_per_update=5,
+    num_mcts_simulations=50,
+    dirichlet_alpha=0.35,
+    test_period=300,
+    num_testplay=20,
+    save_period=3000,
+):
 
-    ray.init(num_cpus=num_cpus, num_gpus=1, local_mode=False)
+    num_rows = 6
+    num_cols = 6
+    model_fn = build_resnet
+    model_params = dict(
+        num_rows=num_rows, num_cols=num_cols, action_space_dims=num_rows * num_cols + 1
+    )
 
-    str_now = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-    save_dir = str_now
+    str_now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    save_dir = save_dir_prefix + f"_{num_rows}x{num_cols}_" + str_now
     os.makedirs(save_dir, exist_ok=True)
 
-    logger.add(os.path.join(save_dir, 'log.txt'))
+    logger.add(os.path.join(save_dir, "log.txt"))
+    logger.info(f"keras: {keras.__version__}")
+    logger.info(f'backend: {os.environ["KERAS_BACKEND"]}')
+    logger.info(f"Reversi: {num_rows=}, {num_cols=}")
+    logger.info(f"Model: {model_fn=}, {model_params}")
 
+    reversi = Reversi(num_rows, num_rows)
+    replay = ReplayBuffer(buffer_size=buffer_size)
 
-    reversi = Reversi(n_rows, n_cols)
-    model = build_resnet(n_rows=reversi.n_rows, n_cols=reversi.n_cols, action_space=reversi.n_action_space)
-    model.summary()
-    current_weights = ray.put(model.get_weights())
-
-    # #: initialize network parameters
-    # dummy_state = othello.encode_state(othello.get_initial_state(), 1)
-    # network.predict(dummy_state)
-
-
-    optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-    replay = ReplayBuffer(buffer_size=buffer_size, reversi=reversi)
-    
+    model = model_fn(**model_params)
     model.compile(
-        optimizer,
+        keras.optimizers.Adam(learning_rate=1e-3),
         loss=[keras.losses.CategoricalCrossentropy(), keras.losses.MeanSquaredError()],
     )
+    model.summary()
 
-    #: 並列Selfplay
+    # 並列処理の準備
+    ray.init(num_cpus=num_cpus, num_gpus=1, local_mode=False)
+    ray_reversi = ray.put(reversi)
+    current_weights = ray.put(model.get_weights())
     work_in_progresses = [
-        selfplay.remote(current_weights, num_mcts_simulations, dirichlet_alpha, reversi)
+        selfplay.remote(
+            weights=current_weights,
+            num_mcts_simulations=num_mcts_simulations,
+            dirichlet_alpha=dirichlet_alpha,
+            reversi=ray_reversi,
+            model_fn=model_fn,
+            model_params=model_params,
+        )
         for _ in range(num_cpus - 2)
     ]
-
     test_in_progress = testplay.remote(
-        current_weights, num_mcts_simulations, reversi, save_dir, n_testplay=n_testplay
+        weights=current_weights,
+        num_mcts_simulations=num_mcts_simulations,
+        reversi=ray_reversi,
+        save_dir=save_dir,
+        model_fn=model_fn,
+        model_params=model_params,
+        num_testplay=num_testplay,
     )
 
-
-    n_updates = 0
-    n = 0
-
+    num_updates = 0
+    episode = 0
     loss_m = keras.metrics.Mean()
-
-    while n <= n_episodes:
-
-        for _ in tqdm(range(update_period)):
-            #: selfplayが終わったプロセスを一つ取得
-            finished, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
-            replay.add_record(ray.get(finished[0]))
-            work_in_progresses.extend([
-                selfplay.remote(current_weights, num_mcts_simulations, dirichlet_alpha, reversi)
-            ])
-            n += 1
-
-        #: Update network
-        if len(replay) >= 20000:
+    while episode <= num_episodes:
+        # 　学習: 棋譜がある程度貯まってから実施
+        if len(replay) >= min_buffer_size_for_training:
             num_iters = epochs_per_update * (len(replay) // batch_size)
-            for i in range(num_iters):
-                states, mcts_policy, rewards = replay.get_minibatch(batch_size=batch_size)
-
+            for _ in range(num_iters):
+                states, mcts_policy, rewards = replay.get_minibatch(
+                    batch_size=batch_size, game=reversi
+                )
                 loss = model.train_on_batch(states, [mcts_policy, rewards])
                 loss_m.update_state(loss)
-                n_updates += 1
-
-                if i % 100 == 0:
-                    logger.info(f'{n_updates=}: {loss_m.result():.4f}')
-
+                num_updates += 1
+            logger.info(f"{episode=}: {num_updates=}: loss={loss_m.result():.4f}")
+            # 学習後のパラメータをrayに共有
             current_weights = ray.put(model.get_weights())
 
-        if n % test_period == 0:
-            print(f"{n - test_period}: TEST")
-            win_count, win_ratio, elapsed_time = ray.get(test_in_progress)
-            print(f"SCORE: {win_count}, {win_ratio}, Elapsed: {elapsed_time}")
-            test_in_progress = testplay.remote(
-                current_weights, num_mcts_simulations, reversi, save_dir, n_testplay=n_testplay
+        # SelfPlay: 棋譜をupdate_periodだけ集める
+        for _ in tqdm(range(update_period)):
+            finished, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
+            replay.add_record(ray.get(finished[0]))
+            episode += 1
+
+            # 1件取ったらすぐに1件投げる
+            work_in_progresses.extend(
+                [
+                    selfplay.remote(
+                        weights=current_weights,
+                        num_mcts_simulations=num_mcts_simulations,
+                        dirichlet_alpha=dirichlet_alpha,
+                        model_fn=model_fn,
+                        model_params=model_params,
+                        reversi=ray_reversi,
+                    )
+                ]
             )
 
-            step = n - test_period
-            step_b = n
-            buffersize = len(replay)
-            logger.info(f'{step=}: {win_count=}')
-            logger.info(f'{step=}: {win_ratio=}')
-            logger.info(f'{step_b=}: {buffersize=}')
+        # TestPlay(1つ前のweightsがセットされていることに注意)
+        if episode % test_period == 0:
+            logger.info(f"{episode - test_period}: TEST")
+            win_count, win_ratio, elapsed_time = ray.get(test_in_progress)
+            logger.info(f"SCORE: {win_count}, {win_ratio:.2f}, Elapsed: {elapsed_time}")
+            test_in_progress = testplay.remote(
+                weights=current_weights,
+                num_mcts_simulations=num_mcts_simulations,
+                reversi=ray_reversi,
+                save_dir=save_dir,
+                model_fn=model_fn,
+                model_params=model_params,
+                num_testplay=num_testplay,
+            )
 
-        if n % save_period == 0:
-            model.save_weights(os.path.join(save_dir, 'weights'))
+            step = episode - test_period
+            step_b = episode
+            buffersize = len(replay)
+            logger.info(f"{step=}: {win_count=}")
+            logger.info(f"{step=}: {win_ratio=}")
+            logger.info(f"{step_b=}: {buffersize=}")
+
+        if episode % save_period == 0:
+            model.save(os.path.join(save_dir, "weights.keras"))
 
 
 if __name__ == "__main__":
-    main(num_cpus=28)
+    main(num_cpus=26, save_dir_prefix="jax")
