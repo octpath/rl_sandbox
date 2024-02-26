@@ -6,5 +6,6 @@
 !.gitkeep
 !.gitignore
 !*.md
+!Dockerfile
 
 !*.py
